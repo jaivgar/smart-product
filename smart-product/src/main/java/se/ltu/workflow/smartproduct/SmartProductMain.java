@@ -3,7 +3,11 @@ package se.ltu.workflow.smartproduct;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Scanner;
 import java.util.logging.Level;
+import java.util.regex.PatternSyntaxException;
+
+import javax.management.ServiceNotFoundException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,15 +16,28 @@ import se.arkalix.ArServiceCache;
 import se.arkalix.ArSystem;
 import se.arkalix.core.plugin.HttpJsonCloudPlugin;
 import se.arkalix.core.plugin.or.OrchestrationStrategy;
+import se.arkalix.descriptor.EncodingDescriptor;
+import se.arkalix.descriptor.TransportDescriptor;
+import se.arkalix.dto.DtoReadException;
+import se.arkalix.net.http.HttpMethod;
 import se.arkalix.net.http.client.HttpClient;
+import se.arkalix.net.http.consumer.HttpConsumer;
+import se.arkalix.net.http.consumer.HttpConsumerRequest;
+import se.arkalix.net.http.consumer.HttpConsumerResponse;
 import se.arkalix.security.identity.OwnedIdentity;
 import se.arkalix.security.identity.TrustStore;
+import se.arkalix.util.concurrent.Future;
 import se.ltu.workflow.smartproduct.arrowhead.AFCoreSystems;
+import se.ltu.workflow.smartproduct.dto.DataOrderDto;
+import se.ltu.workflow.smartproduct.dto.WorkflowBuilder;
 import se.ltu.workflow.smartproduct.properties.TypeSafeProperties;
 
 public class SmartProductMain {
     
- //------------------------------------------------------------------------
+    public static Long serialID;
+    public static Boolean systemON = true;
+    
+    //------------------------------------------------------------------------
     
     private static final Logger logger = LoggerFactory.getLogger(SmartProductMain.class);
     
@@ -114,9 +131,139 @@ public class SmartProductMain {
                     .serviceCache(ArServiceCache.withEntryLifetimeLimit(Duration.ofHours(1)))
                     .build();
             
+            // Command line interface
+            printIntro();
+            while (systemON) {
+                
+                serialID = null;
+                while(serialID == null) {
+                    var userInput = requestUserSerialID();
+                    serialID = parseSerialID(userInput);
+                }
+                // Consume Middleware data
+                System.out.println("**     Sending request to Middleware with above serialID     ** ");
+                System.out.println("**                                                           ** ");
+                System.out.println("****************************************************************");
+                System.out.println("**                                                           ** ");
+                system.consume()
+                    .name(SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION)
+                    .encodings(EncodingDescriptor.JSON)
+                    .transports(TransportDescriptor.HTTP)
+                    .using(HttpConsumer.factory())
+                    .flatMap(consumer -> consumer.send(
+                            new HttpConsumerRequest()
+                                .method(HttpMethod.GET)
+                                .uri(consumer.service().uri() + SmartProductsConstant.MIDDLEWARE_ORDERS_URI
+                                        + serialID)))
+                    .flatMap(response -> identifyOperations(response, system))
+                    .flatMapCatch(ServiceNotFoundException.class,
+                            exception -> {
+                                logger.info("Service " + SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION 
+                                        + " not found in this local cloud");
+                                return Future.done();})
+                    .onFailure(throwable -> throwable.printStackTrace());
+            }
+            
+            
         } catch (Exception e) {
+            logger.error("Smart Product system could not startup, exiting application");
             e.printStackTrace();
         }
+    }
+    
+    public static void printIntro() {
+        System.out.println("****************************************************************");
+        System.out.println("**                                                           ** ");
+        System.out.println("**         Welcome to the Smart Product interface            ** ");
+        System.out.println("**                                                           ** ");
+        System.out.println("****************************************************************");
+
+        
+    }
+    
+    public static String requestUserSerialID() {
+        System.out.println("**                                                           ** ");
+        System.out.println("**     Introduce the SerialID of the product that wants      ** ");
+        System.out.println("**           to be manufactured in this workstation          ** ");
+        System.out.print("** SerialID -> ");
+        Scanner in= new Scanner(System.in);
+        return in.next();
+    }
+    
+    private static Long parseSerialID(String serialID) {
+        try {
+            return Long.parseUnsignedLong(serialID.trim());
+        } catch (NumberFormatException e) {
+            System.out.println("** The data introduced is not a valid number, try again ");
+            return null;
+        }
+    }
+
+    /**
+     * Retrieves the operations needed to be executed by this smart product from the 
+     * ArticleID field of a DataOrderDto in the response. This operations will then be
+     * send as request to a Workflow Manager that offers them.
+     * 
+     * @param response  The response of a Middleware system that has the DataOrder
+     * @return  An empty future
+     */
+    private static Future<?> identifyOperations(HttpConsumerResponse response, ArSystem system){
+        System.out.println("**                Parsing message received...                ** ");
+        return response
+            .bodyAs(DataOrderDto.class)
+            .ifSuccess(dataOrder -> {
+                var operationsInitials = dataOrder.articleId().strip().split("-")[2];
+                if(operationsInitials.length() != 2) 
+                    throw new PatternSyntaxException(
+                            "The ArticleID: " + operationsInitials + "could not be parsed into an operation",
+                            "-", 1);
+                if (operationsInitials.contains("D")) {
+                    if (operationsInitials.contains("M")) {
+                        System.out.println("**             Product requires Drilling & Milling           ** ");
+                        System.out.println("**                                                           ** ");
+                        System.out.println("****************************************************************");
+                        System.out.println("**                                                           ** ");
+                        requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL_AND_DRILL, system);
+                        return;
+                    }
+                    System.out.println("**               Product requires only Drilling              ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    requestOperation(SmartProductsConstant.WORKFLOW_NAME_DRILL, system);
+                }else if (operationsInitials.contains("M")) {
+                    System.out.println("**               Product requires only Milling               ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL, system);
+                }else {
+                    System.out.println("**          Product does not require manufacturing           ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    
+                }
+            })
+            .flatMapCatch(DtoReadException.class, exception -> {
+                logger.error("Response from Middleware with wrong format,"
+                        + " can not be parsed");
+                return Future.done();});
+    }
+    
+    private static void requestOperation(String operationRequired, ArSystem system) {
+        system.consume()
+            .name(SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION)
+            .encodings(EncodingDescriptor.JSON)
+            .transports(TransportDescriptor.HTTP)
+            .using(HttpConsumer.factory())
+            .flatMap(consumer -> consumer.send(
+                    new HttpConsumerRequest()
+                        .method(HttpMethod.POST)
+                        .uri(consumer.service().uri())
+                        .body(new WorkflowBuilder()
+                                .workflowName(operationRequired)
+                                .build())));
     }
 
 }
