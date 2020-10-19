@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>se.ltu.workflow</groupId>
+  <artifactId>smart-product</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+
+  <name>smart-product</name>
+  <description>A simple Smart product to work with Arrowhead Workflow Manager and Executor systems</description>
+  <url>https://github.com/jaivgar/smart-product</url>
+  
+  <packaging>jar</packaging>
+
+  <licenses>
+   	<license>
+   		<name>Eclipse Public License 2.0</name>
+      	<url>https://www.eclipse.org/legal/epl-2.0/</url>
+   	</license>
+  </licenses>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <maven.compiler.version>3.8.1</maven.compiler.version>
+    
+    <maven.resources.version>3.0.2</maven.resources.version>
+    
+    <maven.dependency.version>3.1.2</maven.dependency.version>
+    
+    <maven.assembly.version>3.3.0</maven.assembly.version>
+    
+    <maven.jar.version>3.1.0</maven.jar.version>
+    
+    <kalix.version>0.4.7</kalix.version>
+  </properties>
+
+<dependencies>
+  		<!-- include Arrowhead Kalix -->
+  		<dependency>
+		    <groupId>se.arkalix</groupId>
+		    <artifactId>kalix-base</artifactId>
+		    <version>${kalix.version}</version>
+		</dependency>
+		<dependency>
+		    <groupId>se.arkalix</groupId>
+		    <artifactId>kalix-core-plugins</artifactId>
+		    <version>${kalix.version}</version>
+		</dependency>
+		<dependency>
+		    <groupId>se.arkalix</groupId>
+		    <artifactId>kalix-processors</artifactId>
+		    <version>${kalix.version}</version>
+		    <scope>provided</scope>
+		</dependency>
+		
+		<!-- SLF4J JUL Back-End -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <version>1.7.30</version>
+        </dependency>
+  
+		<!-- include junit 5 -->
+  		<dependency>
+        	<groupId>org.junit.jupiter</groupId>
+        	<artifactId>junit-jupiter-api</artifactId>
+        	<version>5.3.2</version>
+        	<scope>test</scope>
+    	</dependency>
+    	<dependency>
+        	<groupId>org.junit.jupiter</groupId>
+        	<artifactId>junit-jupiter-engine</artifactId>
+        	<version>5.3.2</version>
+        	<scope>test</scope>
+    	</dependency>
+		<dependency>
+	        <groupId>org.junit.vintage</groupId>
+	        <artifactId>junit-vintage-engine</artifactId>
+	        <version>5.3.2</version>
+	        <scope>test</scope>
+	    </dependency>
+  </dependencies>
+
+  <build>
+  	<defaultGoal>clean verify</defaultGoal>
+  	<!-- Configure plugins to avoid using Maven defaults (should be in parent pom) but need to declare them explicitly outside to use them!-->
+    <pluginManagement> 
+      <plugins>
+      
+        <!-- clean lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#clean_Lifecycle -->
+        <plugin>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>3.1.0</version>
+        </plugin>
+        
+        <!-- default lifecycle, jar packaging: see https://maven.apache.org/ref/current/maven-core/default-bindings.html#Plugin_bindings_for_jar_packaging -->
+		
+		<plugin>
+		  <artifactId>maven-resources-plugin</artifactId>
+ 		  <version>${maven.resources.version}</version>
+ 		  <executions>
+ 		  	<!-- Change default behavior of resource plugin to not copy all resources inside jar -->
+ 		  	<execution>
+ 		  	  <!-- Take the default id to overwrite default plugin execution -->
+ 		  	  <id>default-resources</id>
+ 		  	  <phase>process-resources</phase>
+ 		  	  <goals>
+ 		  	  	<goal>resources</goal>
+		  	  </goals>
+		  	  <configuration>
+		  	  <!-- Keep output dir as the default (inside the jar) -->
+<!-- 		  	  	<outputDirectory>${project.build.directory}</outputDirectory> -->
+		  	  	<resources>
+		  	  	  <resource>
+		  	  	  	<!-- Resource dir is the default (src/main/resources) -->
+                  	<directory>src/main/resources</directory>
+					<excludes>
+					  <exclude>certificates/**</exclude>
+					</excludes>
+               	  </resource>
+               	</resources>
+              </configuration>
+          	</execution>
+          	<!-- Copy some resources to target directory -->
+ 		  	<execution>
+ 		  	  <id>copy-resources-custom</id>
+ 		  	  <phase>validate</phase>
+ 		  	  <goals>
+ 		  	  	<goal>copy-resources</goal>
+		  	  </goals>
+		  	  <configuration>
+		  	  	<outputDirectory>${basedir}/target</outputDirectory>
+		  	  	<resources>
+		  	  	  <resource>
+                  	<directory>src/main/resources</directory>
+                  	<includes>
+                  	  <include>application.properties</include>
+                  	  <include>certificates/**</include>
+                  	  <!-- <include>log4j2.xml</include> -->
+               	  	</includes>
+               	  </resource>
+               	</resources>
+              </configuration>
+          	</execution>
+          </executions>
+      	</plugin>
+      	
+        <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven.compiler.version}</version>
+          <!-- Compiler Plugin executes automatically during their phases, you don't have to put executions unlike many other plugins -->
+          <configuration>
+          	<source>${maven.compiler.source}</source>
+          	<target>${maven.compiler.target}</target>
+          	<showDeprecation>true</showDeprecation>
+          	<showWarnings>true</showWarnings>
+          </configuration>
+      	</plugin>
+        
+        <!-- Build an executable JAR and then copy project dependencies-->
+        <plugin>
+	      <groupId>org.apache.maven.plugins</groupId>
+	      <artifactId>maven-jar-plugin</artifactId>
+	      <version>${maven.jar.version}</version>
+	      <configuration>
+	        <archive>
+	          <manifest>
+	            <addClasspath>true</addClasspath>
+	            <mainClass>se.ltu.workflow.smartproduct.SmartProductMain</mainClass>
+	            <!-- Map with copied dependencies, comment otherwise -->
+	            <classpathPrefix>lib/</classpathPrefix> 
+	          </manifest>
+	        </archive>
+	      </configuration>
+	    </plugin>
+	    
+	    <!-- Copy project dependencies XOR assembly jar with dependencies included-->
+	    <plugin>
+       	  <groupId>org.apache.maven.plugins</groupId>
+       	  <artifactId>maven-dependency-plugin</artifactId>
+       	  <version>${maven.dependency.version}</version>
+       	  <executions>
+          	<execution>
+          	  <id>copy-dependencies-custom</id> <!-- Needed see 2 below -->
+          	  <phase>package</phase> 
+          	  <!-- There are not default goals for Maven plugins, but goals can have default phases (Optional)-->
+          	  <goals>
+          	  	<!-- Default phase for goal: process-sources (Not part of "jar" build lifecycle, only part of "default"-->
+              	<goal>copy-dependencies</goal>
+              </goals>
+              <configuration>
+              	<!-- exclude junit, we need runtime dependency only -->
+              	<includeScope>runtime</includeScope>
+              	<outputDirectory>${basedir}/target/lib/</outputDirectory>
+              </configuration>
+          	</execution>
+          </executions>
+      	</plugin>
+      	
+      	<!-- Assembly jar with dependencies included XOR copy project dependencies -->
+      	<plugin>
+      	  <groupId>org.apache.maven.plugins</groupId>
+      	  <artifactId>maven-assembly-plugin</artifactId>
+      	  <version>${maven.assembly.version}</version>
+      	  <configuration>
+      	  	<descriptorRefs>
+      	  	  <descriptorRef>jar-with-dependencies</descriptorRef>
+    	  	</descriptorRefs>
+          </configuration>
+          <executions>
+          	<execution>
+          	  <id>make-assembly-custom</id>
+          	  <phase>package</phase>
+          	  <goals>
+          	  	<goal>single</goal>
+        	  </goals>
+        	  <configuration>
+        	  	<archive>
+        	  	  <manifest>
+        	  	  	<addClasspath>true</addClasspath>
+        	  	    <mainClass>se.ltu.workflow.smartproduct.SmartProductMain</mainClass>
+        	  	  </manifest>
+        	  	</archive>
+        	  </configuration>
+            </execution>
+          </executions>
+        </plugin>
+        
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+      	<artifactId>maven-resources-plugin</artifactId>
+      	<executions>
+      	  <execution>
+      	    <id>resources-custom</id>
+      	  </execution>
+      	  <execution>
+      	    <id>copy-resources-custom</id>
+      	  </execution>
+      	</executions>
+      </plugin>
+      <plugin>
+      	<artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+      <plugin>
+      	<artifactId>maven-jar-plugin</artifactId>
+      </plugin>
+      <plugin>
+      	<artifactId>maven-dependency-plugin</artifactId>
+      </plugin>
+      <plugin>
+      	<artifactId>maven-assembly-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>
