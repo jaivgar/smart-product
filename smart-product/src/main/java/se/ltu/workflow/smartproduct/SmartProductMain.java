@@ -3,6 +3,7 @@ package se.ltu.workflow.smartproduct;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.logging.Level;
 import java.util.regex.PatternSyntaxException;
@@ -19,16 +20,24 @@ import se.arkalix.core.plugin.or.OrchestrationStrategy;
 import se.arkalix.descriptor.EncodingDescriptor;
 import se.arkalix.descriptor.TransportDescriptor;
 import se.arkalix.dto.DtoReadException;
+import se.arkalix.internal.net.http.client.NettyHttpClientResponse;
 import se.arkalix.net.http.HttpMethod;
+import se.arkalix.net.http.HttpStatus;
 import se.arkalix.net.http.client.HttpClient;
+import se.arkalix.net.http.client.HttpClientResponse;
 import se.arkalix.net.http.consumer.HttpConsumer;
 import se.arkalix.net.http.consumer.HttpConsumerRequest;
 import se.arkalix.net.http.consumer.HttpConsumerResponse;
+import se.arkalix.net.http.service.HttpService;
+import se.arkalix.security.access.AccessPolicy;
 import se.arkalix.security.identity.OwnedIdentity;
 import se.arkalix.security.identity.TrustStore;
 import se.arkalix.util.concurrent.Future;
+import se.arkalix.util.concurrent.Schedulers;
 import se.ltu.workflow.smartproduct.arrowhead.AFCoreSystems;
 import se.ltu.workflow.smartproduct.dto.DataOrderDto;
+import se.ltu.workflow.smartproduct.dto.StartOperation;
+import se.ltu.workflow.smartproduct.dto.StartOperationDto;
 import se.ltu.workflow.smartproduct.dto.WorkflowBuilder;
 import se.ltu.workflow.smartproduct.properties.TypeSafeProperties;
 
@@ -131,39 +140,84 @@ public class SmartProductMain {
                     .serviceCache(ArServiceCache.withEntryLifetimeLimit(Duration.ofHours(1)))
                     .build();
             
+            // Add Echo HTTP Service to Arrowhead system
+            system.provide(new HttpService()
+                    // Mandatory service configuration details.
+                    .name(SmartProductsConstant.SPRODUCT_TOOLS_SERVICE_DEFINITION)
+                    .encodings(EncodingDescriptor.JSON)
+                    // Could I have another AccessPolicy for any consumers? as this service will not be registered
+                    .accessPolicy(AccessPolicy.cloud())
+                    .basePath("/")
+                    
+                    // ECHO service
+                    .get(SmartProductsConstant.ECHO_URI,(request, response) -> {
+                        logger.info("Receiving echo request");
+                        response
+                            .status(HttpStatus.OK)
+                            .header("content-type", "text/plain;charset=UTF-8")
+                            .header("cache-control", "no-cache, no-store, max-age=0, must-revalidate")
+                            .body("Got it!");
+                        return Future.done();
+                    }).metadata(Map.ofEntries(Map.entry("http-method","GET")))
+                    
+                    // Service to test Middleware data order input
+                    .put("/test",(request, response) -> {
+                        logger.info("Receiving test middleware request");
+                        return identifyOperationsTest(request.bodyAs(DataOrderDto.class), system)
+                            .ifSuccess(ignoreNow -> response.status(HttpStatus.OK).body("Test worked!"))
+                            .ifFailure(Throwable.class, throwable -> {
+                                throwable.printStackTrace();
+                                response.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed test :( ");});
+
+                    }).metadata(Map.ofEntries(Map.entry("http-method","GET"))))
+                    // new HttpConsumerResponse(response, encoding)
+                .ifSuccess(handle -> logger.info("Smart product echo service is now being served"))
+                .ifFailure(Throwable.class, Throwable::printStackTrace)
+                // Without await service is not sucessfully registered
+                .await();
+            
             // Command line interface
             printIntro();
             while (systemON) {
-                
-                serialID = null;
-                while(serialID == null) {
-                    var userInput = requestUserSerialID();
+                var userInput = requestUserSerialID();
+                if (userInput.strip().equals("exit")) {
+                    logger.info("Shutting down system");
+                    systemON = false;
+                }else {
                     serialID = parseSerialID(userInput);
+                    if(serialID != null) {
+                        // Consume Middleware data
+                        System.out.println("**     Sending request to Middleware with above serialID     ** ");
+                        System.out.println("**                                                           ** ");
+                        System.out.println("****************************************************************");
+                        System.out.println("**                                                           ** ");
+                        system.consume()
+                            .name(SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION)
+                            .encodings(EncodingDescriptor.JSON)
+                            .transports(TransportDescriptor.HTTP)
+                            .using(HttpConsumer.factory())
+                            .flatMap(consumer -> consumer.send(
+                                    new HttpConsumerRequest()
+                                        .method(HttpMethod.GET)
+                                        .uri(consumer.service().uri() + SmartProductsConstant.MIDDLEWARE_ORDERS_URI
+                                                + serialID)))
+                            .flatMapCatch(ServiceNotFoundException.class,
+                                    exception -> {
+                                        logger.info("Service " + SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION 
+                                                + " not found in this local cloud");
+                                        return Future.failure(new ServiceMissingException());})
+                            .ifSuccess(response -> identifyOperations(response, system))
+                            .onFailure(throwable -> throwable.printStackTrace());
+                    }
                 }
-                // Consume Middleware data
-                System.out.println("**     Sending request to Middleware with above serialID     ** ");
-                System.out.println("**                                                           ** ");
-                System.out.println("****************************************************************");
-                System.out.println("**                                                           ** ");
-                system.consume()
-                    .name(SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION)
-                    .encodings(EncodingDescriptor.JSON)
-                    .transports(TransportDescriptor.HTTP)
-                    .using(HttpConsumer.factory())
-                    .flatMap(consumer -> consumer.send(
-                            new HttpConsumerRequest()
-                                .method(HttpMethod.GET)
-                                .uri(consumer.service().uri() + SmartProductsConstant.MIDDLEWARE_ORDERS_URI
-                                        + serialID)))
-                    .flatMap(response -> identifyOperations(response, system))
-                    .flatMapCatch(ServiceNotFoundException.class,
-                            exception -> {
-                                logger.info("Service " + SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION 
-                                        + " not found in this local cloud");
-                                return Future.done();})
-                    .onFailure(throwable -> throwable.printStackTrace());
             }
             
+            //Shutdown server and unregisters (dismiss) the services using the HttpJsonCloudPlugin
+            system.shutdown();
+            // Exit in 0.5 seconds.
+            Schedulers.fixed()
+                .schedule(Duration.ofMillis(500), () -> System.exit(0))
+                .onFailure(Throwable::printStackTrace);
             
         } catch (Exception e) {
             logger.error("Smart Product system could not startup, exiting application");
@@ -176,15 +230,15 @@ public class SmartProductMain {
         System.out.println("**                                                           ** ");
         System.out.println("**         Welcome to the Smart Product interface            ** ");
         System.out.println("**                                                           ** ");
+        System.out.println("**     Type \"exit\" at any moment to shutdown the system      ** ");
+        System.out.println("**                                                           ** ");
         System.out.println("****************************************************************");
-
-        
     }
     
     public static String requestUserSerialID() {
         System.out.println("**                                                           ** ");
         System.out.println("**     Introduce the SerialID of the product that wants      ** ");
-        System.out.println("**           to be manufactured in this workstation          ** ");
+        System.out.println("**          to be manufactured in this workstation           ** ");
         System.out.print("** SerialID -> ");
         Scanner in= new Scanner(System.in);
         return in.next();
@@ -203,6 +257,8 @@ public class SmartProductMain {
      * Retrieves the operations needed to be executed by this smart product from the 
      * ArticleID field of a DataOrderDto in the response. This operations will then be
      * send as request to a Workflow Manager that offers them.
+     * <p>
+     * This operation returns a Future, so be sure that its results will be used.
      * 
      * @param response  The response of a Middleware system that has the DataOrder
      * @return  An empty future
@@ -211,7 +267,11 @@ public class SmartProductMain {
         System.out.println("**                Parsing message received...                ** ");
         return response
             .bodyAs(DataOrderDto.class)
-            .ifSuccess(dataOrder -> {
+            .flatMapCatch(DtoReadException.class, exception -> {
+                logger.error("Response from Middleware with wrong format,"
+                        + " can not be parsed");
+                return Future.done();})
+            .flatMap(dataOrder -> {
                 var operationsInitials = dataOrder.articleId().strip().split("-")[2];
                 if(operationsInitials.length() != 2) 
                     throw new PatternSyntaxException(
@@ -223,36 +283,80 @@ public class SmartProductMain {
                         System.out.println("**                                                           ** ");
                         System.out.println("****************************************************************");
                         System.out.println("**                                                           ** ");
-                        requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL_AND_DRILL, system);
-                        return;
+                        
+                        return requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL_AND_DRILL, system);
                     }
                     System.out.println("**               Product requires only Drilling              ** ");
                     System.out.println("**                                                           ** ");
                     System.out.println("****************************************************************");
                     System.out.println("**                                                           ** ");
-                    requestOperation(SmartProductsConstant.WORKFLOW_NAME_DRILL, system);
+                    
+                    return requestOperation(SmartProductsConstant.WORKFLOW_NAME_DRILL, system);
                 }else if (operationsInitials.contains("M")) {
                     System.out.println("**               Product requires only Milling               ** ");
                     System.out.println("**                                                           ** ");
                     System.out.println("****************************************************************");
                     System.out.println("**                                                           ** ");
-                    requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL, system);
+                    
+                    return requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL, system);
                 }else {
                     System.out.println("**          Product does not require manufacturing           ** ");
                     System.out.println("**                                                           ** ");
                     System.out.println("****************************************************************");
                     System.out.println("**                                                           ** ");
-                    
+                    return Future.done();
                 }
-            })
-            .flatMapCatch(DtoReadException.class, exception -> {
-                logger.error("Response from Middleware with wrong format,"
-                        + " can not be parsed");
-                return Future.done();});
+            });
     }
     
-    private static void requestOperation(String operationRequired, ArSystem system) {
-        system.consume()
+    private static Future<?> identifyOperationsTest(Future<DataOrderDto> input, ArSystem system){
+        System.out.println("**                Parsing message received...                ** ");
+        return input.flatMap(dataOrder -> {
+                var operationsInitials = dataOrder.articleId().strip().split("-")[1];
+                if(operationsInitials.length() != 2)
+                    throw new PatternSyntaxException(
+                            "The ArticleID: " + operationsInitials + "could not be parsed into an operation",
+                            "-", 1);
+                if (operationsInitials.contains("D")) {
+                    if (operationsInitials.contains("M")) {
+                        System.out.println("**             Product requires Drilling & Milling           ** ");
+                        System.out.println("**                                                           ** ");
+                        System.out.println("****************************************************************");
+                        System.out.println("**                                                           ** ");
+                        
+                        return requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL_AND_DRILL, system);
+                        
+                    }
+                    System.out.println("**               Product requires only Drilling              ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    
+                    return requestOperation(SmartProductsConstant.WORKFLOW_NAME_DRILL, system);
+                }else if (operationsInitials.contains("M")) {
+                    System.out.println("**               Product requires only Milling               ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    
+                    return requestOperation(SmartProductsConstant.WORKFLOW_NAME_MILL, system);
+                }else {
+                    System.out.println("**          Product does not require manufacturing           ** ");
+                    System.out.println("**                                                           ** ");
+                    System.out.println("****************************************************************");
+                    System.out.println("**                                                           ** ");
+                    return Future.done();
+                }
+            });
+    }
+    
+    private static Future<StartOperationDto> requestOperation(String operationRequired, ArSystem system) {
+        System.out.println("**         Requesting operation to Workflow Manager          ** ");
+        System.out.println("**                                                           ** ");
+        System.out.println("****************************************************************");
+        System.out.println("**                                                           ** ");
+        
+        return system.consume()
             .name(SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION)
             .encodings(EncodingDescriptor.JSON)
             .transports(TransportDescriptor.HTTP)
@@ -263,7 +367,26 @@ public class SmartProductMain {
                         .uri(consumer.service().uri())
                         .body(new WorkflowBuilder()
                                 .workflowName(operationRequired)
-                                .build())));
+                                .build())))
+            .flatMapCatch(ServiceNotFoundException.class,
+                    exception -> {
+                        logger.info("Service " + SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION
+                                + " not found in this local cloud");
+                        return Future.failure(new ServiceMissingException());})
+            .flatMap(response ->
+                response.bodyAs(StartOperationDto.class)
+                    .ifSuccess(operation -> {
+                        System.out.println("**    The Operation with ID = " + operation.operationId()
+                                + " and name = " + operation.operationName());
+                        System.out.println("**                                                           ** ");
+                        System.out.println("****************************************************************");
+                        System.out.println("**                                                           ** ");
+                        }))
+            .ifFailure(DtoReadException.class, exception -> {
+                logger.error("Response from Workflow Manager with wrong format,"
+                        + " operation can not be parsed");
+                return;});
+            
     }
 
 }
