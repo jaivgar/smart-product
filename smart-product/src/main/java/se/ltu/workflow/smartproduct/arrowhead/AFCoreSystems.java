@@ -38,7 +38,7 @@ public class AFCoreSystems {
                 // Future throws exception (java.net.ConnectException) when server not available
                 client.send(serviceRegistrySocketAddress, new HttpClientRequest()
                     .method(HttpMethod.GET)
-                    .uri("serviceregistry/echo"))
+                    .uri("/serviceregistry/echo"))
                     .flatMap(response -> response.bodyAsString())
                     .ifSuccess(response -> {
                         // If exception is not thrown, request was successful so end loop
@@ -85,7 +85,7 @@ public class AFCoreSystems {
             try {
                 client.send(OrchestratorAddress, new HttpClientRequest()
                     .method(HttpMethod.GET)
-                    .uri("orchestrator/echo"))
+                    .uri("/orchestrator/echo"))
                     .flatMap(response -> response.bodyAsString())
                     .ifSuccess(response -> {
                         timer.endCount();
@@ -131,7 +131,7 @@ public class AFCoreSystems {
                 try {
                     client.send(AuthorizationSocketAddress, new HttpClientRequest()
                         .method(HttpMethod.GET)
-                        .uri("authorization/echo"))
+                        .uri("/authorization/echo"))
                         .flatMap(response -> response.bodyAsString())
                         .ifSuccess(response -> {
                             timer.endCount();

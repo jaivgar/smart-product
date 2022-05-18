@@ -13,7 +13,7 @@ import javax.management.ServiceNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import se.arkalix.ArServiceCache;
+import se.arkalix.ArServiceDescriptionCache;
 import se.arkalix.ArSystem;
 import se.arkalix.core.plugin.HttpJsonCloudPlugin;
 import se.arkalix.core.plugin.or.OrchestrationStrategy;
@@ -135,9 +135,9 @@ public class SmartProductMain {
                             .orchestrationStrategy(OrchestrationStrategy.STORED_THEN_DYNAMIC)
                             .serviceRegistrationPredicate(service -> service.interfaces()
                                     .stream()
-                                    .allMatch(i -> i.encoding().isDtoEncoding()))
+                                    .allMatch(i -> i.encoding().isDto()))
                             .build())
-                    .serviceCache(ArServiceCache.withEntryLifetimeLimit(Duration.ofHours(1)))
+                    .serviceCache(ArServiceDescriptionCache.withEntryLifetimeLimit(Duration.ofHours(1)))
                     .build();
             
             // Add Echo HTTP Service to Arrowhead system
@@ -187,6 +187,7 @@ public class SmartProductMain {
                     serialID = parseSerialID(userInput);
                     if(serialID != null) {
                         // Consume Middleware data
+                        System.out.println("**                                                           ** ");
                         System.out.println("**     Sending request to Middleware with above serialID     ** ");
                         System.out.println("**                                                           ** ");
                         System.out.println("****************************************************************");
@@ -195,7 +196,7 @@ public class SmartProductMain {
                             .name(SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION)
                             .encodings(EncodingDescriptor.JSON)
                             .transports(TransportDescriptor.HTTP)
-                            .using(HttpConsumer.factory())
+                            .oneUsing(HttpConsumer.factory())
                             .flatMap(consumer -> consumer.send(
                                     new HttpConsumerRequest()
                                         .method(HttpMethod.GET)
@@ -203,11 +204,17 @@ public class SmartProductMain {
                                                 + serialID)))
                             .flatMapCatch(ServiceNotFoundException.class,
                                     exception -> {
-                                        logger.info("Service " + SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION 
+                                        logger.error("Service " + SmartProductsConstant.MIDDLEWARE_SERVICE_DEFINTION 
                                                 + " not found in this local cloud");
                                         return Future.failure(new ServiceMissingException());})
-                            .ifSuccess(response -> identifyOperations(response, system))
-                            .onFailure(throwable -> throwable.printStackTrace());
+                            .flatMap(response -> {
+                                return identifyOperations(response, system);
+//                                    .onFailure(throwable -> throwable.printStackTrace()
+//                                            );
+                            })
+                            .ifFailure(Throwable.class, throwable -> throwable.printStackTrace())
+                            .await();
+//                            .onFailure(throwable -> throwable.printStackTrace());
                     }
                 }
             }
@@ -272,7 +279,8 @@ public class SmartProductMain {
                         + " can not be parsed");
                 return Future.done();})
             .flatMap(dataOrder -> {
-                var operationsInitials = dataOrder.articleId().strip().split("-")[2];
+                logger.debug("Data order received and being mapped to the correct operation");
+                var operationsInitials = dataOrder.articleId().strip().split("-")[1];
                 if(operationsInitials.length() != 2) 
                     throw new PatternSyntaxException(
                             "The ArticleID: " + operationsInitials + "could not be parsed into an operation",
@@ -360,7 +368,7 @@ public class SmartProductMain {
             .name(SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION)
             .encodings(EncodingDescriptor.JSON)
             .transports(TransportDescriptor.HTTP)
-            .using(HttpConsumer.factory())
+            .oneUsing(HttpConsumer.factory())
             .flatMap(consumer -> consumer.send(
                     new HttpConsumerRequest()
                         .method(HttpMethod.POST)
@@ -370,7 +378,7 @@ public class SmartProductMain {
                                 .build())))
             .flatMapCatch(ServiceNotFoundException.class,
                     exception -> {
-                        logger.info("Service " + SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION
+                        logger.error("Service " + SmartProductsConstant.WORKSTATION_OPERATIONS_SERVICE_DEFINITION
                                 + " not found in this local cloud");
                         return Future.failure(new ServiceMissingException());})
             .flatMap(response ->
@@ -382,10 +390,10 @@ public class SmartProductMain {
                         System.out.println("****************************************************************");
                         System.out.println("**                                                           ** ");
                         }))
-            .ifFailure(DtoReadException.class, exception -> {
+            .flatMapCatch(DtoReadException.class, exception -> {
                 logger.error("Response from Workflow Manager with wrong format,"
                         + " operation can not be parsed");
-                return;});
+                return Future.done();});
             
     }
 

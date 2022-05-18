@@ -37,8 +37,29 @@
     
     <maven.jar.version>3.1.0</maven.jar.version>
     
-    <kalix.version>0.4.7</kalix.version>
+    <kalix.version>0.5.2-SNAPSHOT</kalix.version>
   </properties>
+  
+  <repositories>
+        <repository>
+            <id>sonatype-snapshots</id>
+            <name>Sonatype Snapshots</name>
+            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+            <layout>default</layout>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+        <repository>
+            <id>central</id>
+            <name>Central Repository</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <layout>default</layout>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+    </repositories>
 
 <dependencies>
   		<!-- include Arrowhead Kalix -->
