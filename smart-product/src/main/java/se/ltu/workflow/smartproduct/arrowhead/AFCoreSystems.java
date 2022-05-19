@@ -14,13 +14,30 @@ import se.arkalix.net.http.client.HttpClientRequest;
 import se.arkalix.util.concurrent.Future;
 import se.ltu.workflow.smartproduct.properties.TypeSafeProperties;
 
-
+/**
+ * A support class to check that the Arrowhead Mandatory Core systems are reachable
+ * <p>
+ * This is NOT a representation of the Arrowhead Mandatory Core system, but a support class with a single
+ * method {@link AFCoreSystems#checkCoreSystems} to check the core systems are present by trying and retrying to communicate
+ * with them.
+ *
+ */
 public class AFCoreSystems {
     
     private static final Logger logger = LoggerFactory.getLogger(AFCoreSystems.class);
 
     private static final TypeSafeProperties props = TypeSafeProperties.getProp();
     
+    /**
+     * Checks the communications with the Arrowhead Core Systems.
+     * 
+     * @param client  The consumer system testing its communication to the core systems
+     * @param minutes  The total time that will be waited before the check is failed, with retries 
+     * every 5 seconds
+     * @throws InterruptedException  if the system/thread is interrupted while doing the checks
+     * @throws TimeoutException  if the time introduced in {@code minutes} has passed without answer from the
+     * core systems
+     */
     public static void checkCoreSystems(HttpClient  client, int minutes)
             throws InterruptedException, TimeoutException {
         
@@ -69,7 +86,7 @@ public class AFCoreSystems {
                     .await();
             }
             catch (InterruptedException e) {
-                logger.error("Workflow Manager interrupted when waiting for Service Regsitry echo message");
+                logger.error("Smart Product interrupted when waiting for Service Regsitry echo message");
                 throw e;
             }
         }
@@ -114,7 +131,7 @@ public class AFCoreSystems {
                     .await();
             }
             catch (InterruptedException e) {
-                logger.error("Workflow Manager interrupted when waiting for Orchestrator echo message");
+                logger.error("Smart Product interrupted when waiting for Orchestrator echo message");
                 throw e;
             }
         }
@@ -161,7 +178,7 @@ public class AFCoreSystems {
                         .await();
                 }
                 catch (InterruptedException e) {
-                    logger.error("Workflow Manager interrupted when waiting for Authorization echo message");
+                    logger.error("Smart Product interrupted when waiting for Authorization echo message");
                     throw e;
                 }
             }
